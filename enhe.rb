@@ -41,7 +41,7 @@ def lookup_en he_word
   boxes = result.css("div.translate_box")
 
   if boxes.length == 0
-    output he_word, ["[NOT FOUND]"], false
+    output "[NOT FOUND]", [he_word], false
     return
   end
 
@@ -49,7 +49,7 @@ def lookup_en he_word
   boxes.each do |box|
     word      = box.css("span.word").text.strip
     translate = box.css("div.default_trans").text.strip
-    output word, [translate], first
+    output translate, [word], first
     first = false
   end
 end
