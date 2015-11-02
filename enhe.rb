@@ -4,6 +4,34 @@
 require 'open-uri'
 require 'nokogiri'
 require 'optparse'
+require 'mechanize'
+
+class RavMilim
+  def initialize
+    @agent = Mechanize.new
+    toppage = @agent.get('http://www.ravmilim.co.il/')
+    topframe = toppage.frames[0]
+    if /sessId=(\d+)/.match(topframe.href)
+      @session_id = $1
+    else
+      print "Session id not obtained"
+      raise
+    end
+  end
+
+  def get_right he_word
+    query = he_word.encode("windows-1255")
+    right_url = "http://www.ravmilim.co.il/rightHebDict.asp?sessId=#{@session_id}&q=#{URI.escape(query)}&num=0&lg="
+    p right_url
+    @agent.get(right_url)
+  end
+
+  def get_left he_word, number
+    query = he_word.encode("windows-1255")
+    left_url = "http://www.ravmilim.co.il/leftHeDict.asp?sessId=#{@session_id}&n=#{number}&CurrentSelection=5&act=6&word=#{query}"
+    @agent.get(left_url)
+  end
+end
 
 def url query
   "http://www.morfix.co.il/#{URI.escape(query)}"
@@ -57,6 +85,18 @@ end
 
 
 def grammer_he_format result
+  verb_conj = [nil, nil, nil, nil, "to <>", "I <>ed", "(he) <>s", "(he) will <>", "(he) <>!"]
+  noun_conj = [nil, nil, "s", nil, "pl", "conj"]
+  conjugation = result.lines.grep(/.*הערך.*/)
+  conjugation = conjugation.map do |c|
+    c = c.gsub(/ *<.*?> */, " ").split(/[ ,]+/).map{|w| w.strip!; w.slice!(0) if w[0] and w[0].ord == 160; w}
+    if c[1] =~ /:/ and c[3] =~ /:/
+      conj_list = c.length >= 8 ? verb_conj : noun_conj
+      c = conj_list.zip(c).map{|x| (x[0].nil? or x[1].nil?) ? nil : x.join("\t")}.compact.join("\n")
+    end
+    c
+  end
+
   result.gsub!(/\n?<\/(td|tr)>\n?/m, '</\1>')
   result.gsub!(/\n?<(td|tr).*?>\n?/m, '<\1>')
   result.gsub!(/<\/?table.*?>/m, "\n\n")
@@ -66,21 +106,17 @@ def grammer_he_format result
   result.gsub!(/^ +/,"")
   result.gsub!(/ +$/,"")
   result.gsub!(/ *\t */,"\t")
-  result
+
+  # parsed result
+  result = [result, "------------------------------\n", conjugation, "==============================\n"].flatten.join("\n").lines.map{|c| c.strip}.join("\n").gsub(/\n\n\n+/, "\n\n")
 end
 
 def grammer_he he_word
-  query = he_word.encode("windows-1255")
-  right_url = "http://www.ravmilim.co.il/rightHebDict.asp?q=#{URI.escape(query)}num0"
-  print right_url
-  right = get(right_url)
-  right.css("input").each do | input |
+  $RavMilim.get_right(he_word).search("input").each do | input |
     if input.attr("onclick") =~ /\(\s*document\.form\s*,\s*([0-9]+)\s*\)/
       number = $1
-      left_url = "https://www.ravmilim.co.il/leftHeDict.asp?sessId=&n=#{number}&CurrentSelection=5&act=6&word=#{URI.escape(query)}"
-      print left_url
-      left = get(left_url)
-      node = left.css("span.main").first
+      left = $RavMilim.get_left(he_word, number)
+      node = left.search("span.main").first
       while node.instance_of?(Nokogiri::XML::Element)
         break if node.name == "td"
         node = node.parent
@@ -96,6 +132,10 @@ option = {}
 OptionParser.new do |opt|
   opt.on("-g", "lookup grammar") { |v| option[:g] = v }
   opt.parse!(ARGV)
+end
+
+if option[:g]
+  $RavMilim = RavMilim.new
 end
 
 ARGV.each do |word|
