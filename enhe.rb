@@ -3,6 +3,7 @@
 
 require 'open-uri'
 require 'nokogiri'
+require 'optparse'
 
 def url query
   "http://www.morfix.co.il/#{URI.escape(query)}"
@@ -54,10 +55,53 @@ def lookup_en he_word
   end
 end
 
+
+def grammer_he_format result
+  result.gsub!(/\n?<\/(td|tr)>\n?/m, '</\1>')
+  result.gsub!(/\n?<(td|tr).*?>\n?/m, '<\1>')
+  result.gsub!(/<\/?table.*?>/m, "\n\n")
+  result.gsub!(/\s*<\/td>[^><]*<td.*?>\s*/m, "\t\t\t")
+  result.gsub!(/\s*<\/tr>[^><]*<tr.*?>\s*/m, "\n")
+  result.gsub!(/ *<.*?> */, "")
+  result.gsub!(/^ +/,"")
+  result.gsub!(/ +$/,"")
+  result.gsub!(/ *\t */,"\t")
+  result
+end
+
+def grammer_he he_word
+  query = he_word.encode("windows-1255")
+  right_url = "http://www.ravmilim.co.il/rightHebDict.asp?q=#{URI.escape(query)}num0"
+  print right_url
+  right = get(right_url)
+  right.css("input").each do | input |
+    if input.attr("onclick") =~ /\(\s*document\.form\s*,\s*([0-9]+)\s*\)/
+      number = $1
+      left_url = "https://www.ravmilim.co.il/leftHeDict.asp?sessId=&n=#{number}&CurrentSelection=5&act=6&word=#{URI.escape(query)}"
+      print left_url
+      left = get(left_url)
+      node = left.css("span.main").first
+      while node.instance_of?(Nokogiri::XML::Element)
+        break if node.name == "td"
+        node = node.parent
+      end
+      print grammer_he_format(node.inner_html.encode!(Encoding::UTF_8))
+      break      # only the first element of "right"...
+    end
+  end
+end
+
+
+option = {}
+OptionParser.new do |opt|
+  opt.on("-g", "lookup grammar") { |v| option[:g] = v }
+  opt.parse!(ARGV)
+end
+
 ARGV.each do |word|
-  if word =~ /[a-zA-Z]/
-    lookup_he(word)
-  else
-    lookup_en(word)
+  if    word =~ /[a-zA-Z]/ and not option[:g] then; lookup_he(word)
+  elsif word =~ /[a-zA-Z]/ and     option[:g] then; raise "grammar only for hebrew input."
+  elsif                            option[:g] then; grammer_he(word)
+  else                                              lookup_en(word)
   end
 end
